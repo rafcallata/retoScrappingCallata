@@ -1,0 +1,17 @@
+git init
+yarn init -y
+yarn add esbuild --dev
+*************************
+para crear arcbivos 
+copy con gitignore
+node_modules/
+*error*
+dist/
+mkdir src
+mkdir dist
+D:\RAFAEL\2022_I\BOOTCAMP\Scrapping\sesion2>
+
+hora de video 2:48:36
+hora de video 3:32:31
+
+hora de video 1:07:10

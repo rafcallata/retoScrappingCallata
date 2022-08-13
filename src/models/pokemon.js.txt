@@ -1,0 +1,10 @@
+class Pokemon{
+    constructor(name){
+        this.name = name
+    }
+    atack(){
+        console.log("Estoy atacnado")
+    }
+}
+
+export default Pokemon

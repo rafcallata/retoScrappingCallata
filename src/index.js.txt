@@ -1,0 +1,3 @@
+import Pokemon from "./models/pokemon";
+const Pikachu = new Pokemon('Picachu')
+console.table(Pic)
