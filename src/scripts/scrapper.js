@@ -60,9 +60,9 @@ async function scrap(){
         await waitForSelector('h1')
         await waitForScroll()
 
-        const name = $(profileSelectors.name).textContent
-        const experienceTitles = getEspecificInfo(profileSelectors.experiencesElements)
-        const educationTitles = getEspecificInfo(profileSelectors.educationElements)
+        const name = $(profileSelectors.name).textContent;
+        const experienceTitles = getEspecificInfo(profileSelectors.experiencesElements);
+        const educationTitles = getEspecificInfo(profileSelectors.educationElements);
         const contactInfo = await getContactInfo()
         const profile = {
             name,
@@ -70,6 +70,9 @@ async function scrap(){
             experienceTitles,
             educationTitles
         }
+        const port = chrome.runtime.connect({name: "secureChannelScrapProfile"});
+
+        port.postMessage({profile})
         console.log(profile)
     } catch (error) {
         console.log('🚀 ~ file: scrapper.js ~ line 70 ~ scrap ~ error', error);
