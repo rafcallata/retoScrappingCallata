@@ -1,57 +1,113 @@
-import { db } from "./config/conexion.dexie"
+import { validate } from 'schm';
+import { db } from './config/conexion.dexie';
+import { SecureChannelsEnum as secureChannels } from './constants';
+import FetchService from './service/fetchService';
+import {
+  deleteAndCreateTab,
+  inyectScrapCandidates,
+  inyectScript
+} from './utils/chrome';
+import { addUrlParams, getUrlParams } from './utils/urls';
 
-async function inyectScript(path, tabId){
-    const options = {
-        target: {tabId},
-        files: [path]
-    }
-    return chrome.scripting.executeScript(options)
+
+// eslint-disable-next-line no-undef
+chrome.action.onClicked.addListener((tab)=> {
+  inyectScrapCandidates(tab.id);
+  // inyectScript('scripts/scrapper.js', tab.id);
+});
+
+// eslint-disable-next-line no-undef
+chrome.runtime.onConnect.addListener((port)=> {
+  if(!Object.values(secureChannels).includes(port.name))
+    throw new Error('Not secure Channel');
+
+  port.onMessage.addListener(_portOnmessageHandler);
+});
+
+/* chrome.webNavigation.onCompleted.addListener((a)=>{
+  console.log(a.tabId)
+}, {hostPrefix: 'https://www.linkedin.com/in/'}) */
+
+async function saveUrlsCandidates (urlsCandidates) {
+  if(!urlsCandidates.length) throw new Error('Not enough data');
+
+  const urlsCandidatesFiltered = await Promise.all(urlsCandidates
+    .filter(async (urlsCandidate) => {
+      try {
+        await validate(urlsCandidate);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    })
+  );
+  // Si falla el servicio remoto, guardar localmente en indexDB
+  FetchService.createUrlProfiles(urlsCandidatesFiltered).catch(async err => {
+    // eslint-disable-next-line no-console
+    console.log(
+      '🚀 ~ file: sw.js ~ line 48 ~ FetchService.createUrlProfiles ~ err', err
+    );
+
+    db.urlsCandidate.add({
+      urls: urlsCandidates
+    });
+  });
 }
 
-async function inyectScrapCandidates (tabId){
-    return inyectScript("scripts/scrapCandidate.js", tabId)
+function setNextPageParam(tabUrl) {
+  const urlParams = getUrlParams(tabUrl);
+
+  const actualPage = Number(urlParams.get('page') ?? 1);
+  const nextPage = actualPage + 1;
+
+  urlParams.set('page', nextPage);
+
+  return [nextPage, addUrlParams(tabUrl,urlParams)];
 }
 
-chrome.action.onClicked.addListener((tab)=>{
-    console.log('click')
-    inyectScrapCandidates(tab.id)    
-})
+async function scrapProfiles(tabUrl, tabId, urlsCandidates) {
+  const [nextPage, nextUrl] = setNextPageParam(tabUrl);
 
-chrome.runtime.onConnect.addListener((port)=>{
-    const secureChannels = ['secureChannelScrap', 'secureChannelScrapProfile']
-    if(!secureChannels.includes(port.name))
-        throw new Error('Not secure Channel')
-    
-    switch (port.name) {
-        case secureChannels[0]:{
-            port.onMessage.addListener(async (msg, {sender: {tab: {id: tabId, url: tabUrl}}}) =>{
-                console.log('🚀 ~ file: sw.js ~ line 14 ~ port.onMessage.addListener ~ error', msg);
-                const originalUrlParams = new URLSearchParams(tabUrl.match(/\?.+/)[0].replace('?',''))
-                const page = originalUrlParams.has('page') ? originalUrlParams.get('page') : 2
-        
-                //await chrome.tabs.update(tabId, {url: tabUrl+'$page='+page})
-        
-                db.urlsCandidate.add({
-                    urls : msg.urlsCandidate
-                })
-        
-                const {id} = await chrome.tabs.create({url: msg.urlsCandidate[0]})
-        
-                inyectScript('scripts/scrapper.js', id)
-                //inyectScript('scripts/scrapper.js')
-          
-                //inyectScrapCandidates(tabId)
-            });
-            break;}
-        case secureChannels[1]:{
-            port.onMessage.addListener(async ({profile}, {sender : {tab: {id: tabId}}}) =>{                        
-                db.profiles.add(profile)
-                const {urlsRaw} = await db.urlsCandidate.toArray()
-                await chrome.tabs.update(tabId, {url: urlsRaw.urls[1]})
-                inyectScript('scripts/scrapper.js', tabId)
-            });
-            break;}
-        default:
-            break;
+  if(nextPage <= 3) {
+    saveUrlsCandidates(urlsCandidates);
+    const newTabId = await deleteAndCreateTab(tabId,nextUrl);
+    inyectScrapCandidates(newTabId);
+  } else {
+    const newTabId = await deleteAndCreateTab(tabId, urlsCandidates[0]);
+    inyectScript('scripts/scrapper.js', newTabId);
+  }
+}
+
+const _portOnmessageHandler = async (msg, port) => {
+  const { urlsCandidates, profile } = msg;
+
+  const {
+    name,
+    sender: {
+      tab: {
+        id: tabId,
+        url: tabUrl
+      }
     }
-})
+  } = port;
+
+  switch (name) {
+  case secureChannels.scrapProfiles:
+    scrapProfiles(tabUrl, tabId, urlsCandidates);
+    break;
+  case secureChannels.scrapv1:{
+    db.profiles.add(profile);
+    const [urlsRaw] = await db.urlsCandidate.toArray();
+    const newTabId = await deleteAndCreateTab(tabId, urlsRaw.urls[2]);
+
+    inyectScript('scripts/scrapper.js', newTabId);
+
+    break;
+  }
+  case secureChannels.scrapProfilesV2:
+    saveUrlsCandidates(urlsCandidates);
+    break;
+  default:
+    break;
+  }
+};
